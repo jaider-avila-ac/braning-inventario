@@ -16,7 +16,6 @@ const COLUMNS = [
   { key: "nombre_completo", label: "Cliente", sortable: true },
   { key: "documento", label: "Documento", sortable: true },
   { key: "telefono", label: "Teléfono", sortable: true },
-  { key: "email", label: "Email", sortable: true },
   { key: "saldo_formateado", label: "Saldo a favor", sortable: true, align: "right" },
   { key: "deuda_formateada", label: "Total que debe", sortable: true, align: "right" },
 ];
@@ -84,7 +83,6 @@ export default function ClientesPage() {
     ),
     documento: c.tipo_documento && c.num_documento ? `${c.tipo_documento} ${c.num_documento}` : "—",
     telefono: c.telefono || "—",
-    email: c.email || "—",
     saldo_formateado: formatSaldo(c.saldo_a_favor),
     deuda_formateada: formatDeuda(c.total_deuda),
     nombre_razon_social: c.nombre_razon_social,
