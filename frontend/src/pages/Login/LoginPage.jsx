@@ -161,6 +161,12 @@ export default function LoginPage() {
               <span>{loading ? "Ingresando..." : "Ingresar"}</span>
             </button>
           </form>
+
+          <p className="mt-6 text-center">
+            <span className="inline-block text-xs font-semibold uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-3 py-1">
+              Versión temporal VPS
+            </span>
+          </p>
         </div>
       </div>
     </div>
