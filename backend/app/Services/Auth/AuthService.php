@@ -14,7 +14,6 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 class AuthService
 {
     private const ALIVE_TTL              = 300;   // segundos — inactividad de sesión activa
-    private const USER_KEY_TTL           = 86400; // segundos — 24 horas
     private const MAX_PASSWORD_ATTEMPTS  = 5;
     private const ATTEMPTS_TTL           = 15;    // minutos — ventana de bloqueo
 
@@ -68,24 +67,7 @@ class AuthService
         // Contraseña correcta — limpiar contador de intentos
         Cache::forget($attemptsKey);
 
-        // ── Sesión única: verificar si ya hay una sesión activa ───────────────
-        $userKey         = "session:user:{$usuario->id}";
-        $existingTokenId = Cache::get($userKey);
-
-        if ($existingTokenId !== null) {
-            $aliveKey = "session:alive:{$existingTokenId}";
-
-            if (Cache::has($aliveKey)) {
-                throw new HttpException(409, 'Ya hay una sesión activa para este usuario.');
-            }
-
-            // Sesión caducada por inactividad — limpiar
-            $usuario->tokens()->where('id', $existingTokenId)->delete();
-            Cache::forget($userKey);
-            Cache::forget($aliveKey);
-        }
-
-        // ── Crear nuevo token Sanctum ─────────────────────────────────────────
+        // ── Crear nuevo token Sanctum (se permiten varias sesiones por usuario) ─
         $newToken    = $usuario->createToken(
             name:      'access',
             abilities: $this->resolverAbilities($usuario),
@@ -93,7 +75,6 @@ class AuthService
         $accessToken = $newToken->plainTextToken;
         $tokenId     = $newToken->accessToken->id;
 
-        Cache::put($userKey, $tokenId, self::USER_KEY_TTL);
         Cache::put("session:alive:{$tokenId}", true, self::ALIVE_TTL);
 
         // ── Registro y auditoría ──────────────────────────────────────────────

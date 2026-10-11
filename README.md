@@ -78,8 +78,8 @@ docker compose exec db sh -c 'mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" "$M
   docker compose cp ./public/. backend:/var/www/html/storage/app/public/
   docker compose exec backend chown -R www-data:www-data storage/app/public
   ```
-- **Sesión única**: la app solo permite una sesión activa por usuario (expira tras 5 min de
-  inactividad). Un segundo login mientras la otra sigue viva devuelve 409.
+- **Sesiones**: un usuario puede tener varias sesiones abiertas a la vez; cada una expira tras
+  5 min de inactividad.
 - **HTTPS**: cuando haya dominio, poner un proxy con certificado delante (Caddy, Nginx Proxy
   Manager o Traefik) y cambiar `APP_URL=https://…` y `SESSION_SECURE_COOKIE=true`.
 - Las migraciones **no** se ejecutan solas (el volcado ya trae el esquema). Si se agrega una

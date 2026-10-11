@@ -10,6 +10,14 @@ class ClienteRepository
    public function paginate(int $empresaId, string $search = '', int $perPage = 10, int $page = 1): LengthAwarePaginator
     {
         return Cliente::where('empresa_id', $empresaId)
+            ->select('clientes.*')
+            // Total adeudado: saldo pendiente de facturas emitidas
+            ->selectSub(function ($q) {
+                $q->from('facturas')
+                  ->selectRaw('COALESCE(SUM(saldo), 0)')
+                  ->whereColumn('facturas.cliente_id', 'clientes.id')
+                  ->where('facturas.estado', 'EMITIDA');
+            }, 'total_deuda')
             ->when($search, function($q) use ($search) {
                 return $q->where(function($q) use ($search) {
                     $q->where('nombre_razon_social', 'like', "%{$search}%")

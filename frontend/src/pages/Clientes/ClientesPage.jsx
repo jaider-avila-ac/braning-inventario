@@ -18,6 +18,7 @@ const COLUMNS = [
   { key: "telefono", label: "Teléfono", sortable: true },
   { key: "email", label: "Email", sortable: true },
   { key: "saldo_formateado", label: "Saldo a favor", sortable: true, align: "right" },
+  { key: "deuda_formateada", label: "Total que debe", sortable: true, align: "right" },
 ];
 
 const IMPORT_INITIAL = { phase: "idle", file: null, progress: 0, successCount: 0, errors: [] };
@@ -33,6 +34,12 @@ export default function ClientesPage() {
   const formatSaldo = (saldo) => {
     const saldoNum = saldo || 0;
     if (saldoNum > 0) return <span className="text-emerald-600 font-semibold">{formatMoney(saldoNum)}</span>;
+    return <span className="text-gray-400">—</span>;
+  };
+
+  const formatDeuda = (deuda) => {
+    const deudaNum = Number(deuda) || 0;
+    if (deudaNum > 0) return <span className="text-red-600 font-semibold">{formatMoney(deudaNum)}</span>;
     return <span className="text-gray-400">—</span>;
   };
 
@@ -79,6 +86,7 @@ export default function ClientesPage() {
     telefono: c.telefono || "—",
     email: c.email || "—",
     saldo_formateado: formatSaldo(c.saldo_a_favor),
+    deuda_formateada: formatDeuda(c.total_deuda),
     nombre_razon_social: c.nombre_razon_social,
   }));
 

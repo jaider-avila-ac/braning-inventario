@@ -34,33 +34,18 @@ class CheckActiveToken
             ], 401);
         }
 
-        $tokenId  = $token->id;
-        $userId   = $user->id;
-        $aliveKey = "session:alive:{$tokenId}";
-        $userKey  = "session:user:{$userId}";
+        $aliveKey = "session:alive:{$token->id}";
 
         // 1. Inactividad — sin actividad en 5 minutos
         if (!Cache::has($aliveKey)) {
             $token->delete();
-            Cache::forget($userKey);
             return response()->json([
                 'message' => 'Sesión expirada por inactividad. Por favor, inicia sesión nuevamente.',
                 'code'    => 'SESSION_TIMEOUT',
             ], 401);
         }
 
-        // 2. Sesión única — verificar que este token sea el activo para el usuario
-        $activeTokenId = Cache::get($userKey);
-        if ((string) $activeTokenId !== (string) $tokenId) {
-            $token->delete();
-            Cache::forget($aliveKey);
-            return response()->json([
-                'message' => 'Tu sesión fue iniciada en otro dispositivo.',
-                'code'    => 'SESSION_REPLACED',
-            ], 401);
-        }
-
-        // 3. Renovar el temporizador de inactividad
+        // 2. Renovar el temporizador de inactividad
         Cache::put($aliveKey, true, self::ALIVE_TTL);
 
         return $next($request);
