@@ -1,0 +1,405 @@
+<?php
+
+namespace App\Repositories;
+
+use App\Models\CajaMovimiento;
+use App\Models\Compra;
+use App\Models\CompraItem;
+use App\Models\EgresoCompra;
+use App\Models\Inventario;
+use App\Models\InventarioMovimiento;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+
+class CompraRepository
+{
+    public function paginate(int $empresaId, array $filters = [], int $perPage = 20): LengthAwarePaginator
+    {
+        $search      = $filters['search']       ?? '';
+        $estado      = $filters['estado']       ?? null;
+        $proveedorId = $filters['proveedor_id'] ?? null;
+        $desde       = $filters['desde']        ?? null;
+        $hasta       = $filters['hasta']        ?? null;
+
+        return Compra::where('empresa_id', $empresaId)
+            ->with(['proveedor', 'usuario'])
+            ->when($search, fn($q) => $q->where(fn($q) =>
+                $q->where('numero',      'like', "%{$search}%")
+                  ->orWhereHas('proveedor', fn($q) =>
+                        $q->where('nombre', 'like', "%{$search}%"))
+            ))
+            ->when($estado,      fn($q) => $q->where('estado',      $estado))
+            ->when($proveedorId, fn($q) => $q->where('proveedor_id', $proveedorId))
+            ->when($desde,       fn($q) => $q->whereDate('fecha', '>=', $desde))
+            ->when($hasta,       fn($q) => $q->whereDate('fecha', '<=', $hasta))
+            ->orderByDesc('created_at')
+            ->paginate($perPage);
+    }
+//nuevo arhivo
+    public function allByEmpresa(int $empresaId): Collection
+    {
+        return Compra::where('empresa_id', $empresaId)
+            ->with(['proveedor', 'usuario', 'items.item'])
+            ->orderByDesc('created_at')
+            ->get();
+    }
+
+    public function findById(int $id): ?Compra
+    {
+        return Compra::with(['proveedor', 'usuario', 'items.item', 'egresos'])->find($id);
+    }
+
+    public function create(array $cabecera, array $items): Compra
+    {
+        return DB::transaction(function () use ($cabecera, $items) {
+            $compra = Compra::create($cabecera);
+            $this->sincronizarItems($compra->id, $items);
+            return $compra->fresh(['items.item', 'proveedor']);
+        });
+    }
+
+    public function confirmar(int $id, string $numero, int $usuarioId, ?array $archivoData = null): Compra
+    {
+        return DB::transaction(function () use ($id, $numero, $usuarioId, $archivoData) {
+            $compra = Compra::with('items.item')->lockForUpdate()->findOrFail($id);
+
+            // Actualizar inventario
+            foreach ($compra->items as $compraItem) {
+                $item = $compraItem->item;
+                if (! $item || ! $item->controla_inventario) continue;
+
+                $inventario = Inventario::where('empresa_id', $compra->empresa_id)
+                    ->where('item_id', $item->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($inventario) {
+                    $nuevasUnidades = $inventario->unidades_actuales + $compraItem->cantidad;
+                    $inventario->update(['unidades_actuales' => $nuevasUnidades]);
+
+                    InventarioMovimiento::create([
+                        'empresa_id'           => $compra->empresa_id,
+                        'item_id'              => $item->id,
+                        'usuario_id'           => $usuarioId,
+                        'tipo'                 => 'ENTRADA',
+                        'subtipo'              => $compra->condicion_pago === 'CONTADO' ? 'COMPRA_CONTADO' : 'COMPRA_CREDITO',
+                        'compra_id'            => $compra->id,
+                        'motivo'               => "Compra {$numero}",
+                        'referencia_tipo'      => 'COMPRA',
+                        'referencia_id'        => $compra->id,
+                        'unidades'             => $compraItem->cantidad,
+                        'unidades_resultantes' => $nuevasUnidades,
+                        'ocurrido_en'          => now(),
+                    ]);
+                }
+            }
+
+            // Si es CONTADO, actualizar estado y saldo a 0
+            if ($compra->condicion_pago === 'CONTADO') {
+                $compra->update([
+                    'numero'          => $numero,
+                    'estado'          => 'PAGADA',
+                    'saldo_pendiente' => 0,
+                ]);
+
+                // Crear el egreso de pago contado con el archivo
+                $egresoData = [
+                    'empresa_id'  => $compra->empresa_id,
+                    'usuario_id'  => $usuarioId,
+                    'compra_id'   => $compra->id,
+                    'fecha'       => $compra->fecha,
+                    'descripcion' => "Pago contado compra {$numero}",
+                    'monto'       => $compra->total,
+                    'medio_pago'  => 'CONTADO',
+                    'notas'       => null,
+                    'estado'      => 'ACTIVO',
+                ];
+
+                if ($archivoData) {
+                    $egresoData['archivo_path'] = $archivoData['path'];
+                    $egresoData['archivo_mime'] = $archivoData['mime'];
+                    $egresoData['archivo_nombre'] = $archivoData['nombre'];
+                }
+
+                $egreso = EgresoCompra::create($egresoData);
+
+                CajaMovimiento::create([
+                    'empresa_id'  => $compra->empresa_id,
+                    'usuario_id'  => $usuarioId,
+                    'origen_tipo' => 'EGRESO_COMPRA',
+                    'origen_id'   => $egreso->id,
+                    'descripcion' => $egreso->descripcion,
+                    'monto'       => $egreso->monto,
+                    'fecha'       => $egreso->fecha,
+                    'created_at'  => now(),
+                ]);
+            } else {
+                // CREDITO: solo actualizar número y dejar saldo pendiente
+                $compra->update([
+                    'numero'          => $numero,
+                    'estado'          => 'PENDIENTE',
+                    'saldo_pendiente' => $compra->total,
+                ]);
+            }
+
+            return $compra->fresh(['items.item', 'proveedor', 'egresos']);
+        });
+    }
+
+    public function registrarPago(int $id, float $monto, int $empresaId, int $usuarioId, array $egresoData): Compra
+    {
+        return DB::transaction(function () use ($id, $monto, $empresaId, $usuarioId, $egresoData) {
+            $compra = Compra::where('empresa_id', $empresaId)->lockForUpdate()->findOrFail($id);
+
+            $nuevoSaldo  = max(0, round((float) $compra->saldo_pendiente - $monto, 2));
+            $nuevoEstado = $nuevoSaldo <= 0 ? 'PAGADA' : 'PARCIAL';
+
+            $compra->update(['saldo_pendiente' => $nuevoSaldo, 'estado' => $nuevoEstado]);
+
+            $egresoDataToCreate = [
+                'empresa_id'  => $empresaId,
+                'usuario_id'  => $usuarioId,
+                'compra_id'   => $compra->id,
+                'fecha'       => $egresoData['fecha'],
+                'descripcion' => $egresoData['descripcion'] ?? "Abono compra {$compra->numero}",
+                'monto'       => $monto,
+                'medio_pago'  => $egresoData['medio_pago'],
+                'notas'       => $egresoData['notas'] ?? null,
+                'estado'      => 'ACTIVO',
+            ];
+            
+            if (isset($egresoData['archivo_path'])) {
+                $egresoDataToCreate['archivo_path'] = $egresoData['archivo_path'];
+                $egresoDataToCreate['archivo_mime'] = $egresoData['archivo_mime'];
+                $egresoDataToCreate['archivo_nombre'] = $egresoData['archivo_nombre'];
+            }
+            
+            $egreso = EgresoCompra::create($egresoDataToCreate);
+
+            CajaMovimiento::create([
+                'empresa_id'  => $empresaId,
+                'usuario_id'  => $usuarioId,
+                'origen_tipo' => 'EGRESO_COMPRA',
+                'origen_id'   => $egreso->id,
+                'descripcion' => $egreso->descripcion,
+                'monto'       => $monto,
+                'fecha'       => $egreso->fecha,
+                'created_at'  => now(),
+            ]);
+
+            return $compra->fresh(['items.item', 'proveedor', 'egresos']);
+        });
+    }
+
+    public function anular(int $id, int $empresaId, int $usuarioId): Compra
+    {
+        return DB::transaction(function () use ($id, $empresaId, $usuarioId) {
+            $compra = Compra::with('items.item')
+                ->where('empresa_id', $empresaId)
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            // ── Paso 1: calcular cuántas unidades pueden anularse ─────────────
+            $totalCompra   = 0;
+            $totalAnulable = 0;
+            $itemsAnulacion = [];
+
+            if ($compra->numero !== null) {
+                foreach ($compra->items as $compraItem) {
+                    $item         = $compraItem->item;
+                    $cantCompra   = (int) $compraItem->cantidad;
+                    $cantAnulable = $cantCompra; // Default para ítems sin inventario
+
+                    if ($item && $item->controla_inventario) {
+                        $inventario = Inventario::where('empresa_id', $empresaId)
+                            ->where('item_id', $item->id)
+                            ->lockForUpdate()
+                            ->first();
+
+                        $cantAnulable = $inventario
+                            ? min($cantCompra, max(0, (int) $inventario->unidades_actuales))
+                            : 0;
+
+                        $itemsAnulacion[] = [
+                            'compraItem'    => $compraItem,
+                            'item'          => $item,
+                            'inventario'    => $inventario,
+                            'cant_compra'   => $cantCompra,
+                            'cant_anulable' => $cantAnulable,
+                        ];
+                    }
+
+                    $totalCompra   += $cantCompra;
+                    $totalAnulable += $cantAnulable;
+                }
+
+                // Bloquear si ninguna unidad puede anularse
+                $hayInventario = count($itemsAnulacion) > 0;
+                if ($hayInventario && $totalAnulable === 0) {
+                    throw new \RuntimeException(
+                        'No hay unidades disponibles para anular. ' .
+                        'Todas las unidades de esta compra ya fueron consumidas o vendidas.'
+                    );
+                }
+
+                // ── Paso 2: revertir inventario ───────────────────────────────
+                $fraccion = $totalCompra > 0 ? ($totalAnulable / $totalCompra) : 1.0;
+                $esFull   = abs($fraccion - 1.0) < 0.001;
+                $subtipo  = $esFull ? 'ANULACION_COMPRA' : 'AJUSTE_ANULACION_PARCIAL';
+
+                foreach ($itemsAnulacion as $d) {
+                    if ($d['cant_anulable'] <= 0 || ! $d['inventario']) continue;
+
+                    $nuevasUnidades = max(0, (int) $d['inventario']->unidades_actuales - $d['cant_anulable']);
+                    $d['inventario']->update(['unidades_actuales' => $nuevasUnidades]);
+
+                    InventarioMovimiento::create([
+                        'empresa_id'           => $empresaId,
+                        'item_id'              => $d['item']->id,
+                        'usuario_id'           => $usuarioId,
+                        'tipo'                 => 'SALIDA',
+                        'subtipo'              => $subtipo,
+                        'compra_id'            => $compra->id,
+                        'motivo'               => "Anulación compra {$compra->numero}",
+                        'referencia_tipo'      => 'COMPRA',
+                        'referencia_id'        => $compra->id,
+                        'unidades'             => $d['cant_anulable'],
+                        'unidades_resultantes' => $nuevasUnidades,
+                        'ocurrido_en'          => now(),
+                    ]);
+                }
+
+                // ── Paso 3: reversión financiera ──────────────────────────────
+                $egresosActivos = $compra->egresos()->where('estado', 'ACTIVO')->get();
+                $totalAbonado   = (float) $egresosActivos->sum('monto');
+
+                if ($esFull) {
+                    // Anulación total: marcar egresos ANULADO (reduce egresos_compras automáticamente)
+                    // Los registros en caja_movimientos se conservan como historial
+                    foreach ($egresosActivos as $egreso) {
+                        $egreso->update(['estado' => 'ANULADO']);
+                    }
+                } else {
+                    // Anulación parcial: los egresos quedan ACTIVO (son hechos históricos)
+                    // Se crea un IngresoManual proporcional al reembolso
+                    $montoDevolucion = round($fraccion * $totalAbonado, 2);
+
+                    if ($montoDevolucion > 0) {
+                        \App\Models\IngresoManual::create([
+                            'empresa_id'  => $empresaId,
+                            'usuario_id'  => $usuarioId,
+                            'fecha'       => now()->toDateString(),
+                            'descripcion' => "Reembolso parcial compra {$compra->numero} ({$totalAnulable}/{$totalCompra} uds.)",
+                            'monto'       => $montoDevolucion,
+                            'notas'       => "Generado automáticamente por anulación parcial de compra #{$compra->id}.",
+                            'estado'      => 'ACTIVO',
+                        ]);
+                    }
+                }
+            }
+
+            // ── Paso 4: cancelar deuda pendiente (CRÉDITO) ───────────────────
+            if ($compra->condicion_pago === 'CREDITO' && (float) $compra->saldo_pendiente > 0) {
+                $compra->update(['saldo_pendiente' => 0]);
+            }
+
+            // ── Paso 5: marcar compra como ANULADA ────────────────────────────
+            $compra->update(['estado' => 'ANULADA', 'anulado_por_id' => $usuarioId]);
+
+            return $compra->fresh(['proveedor', 'usuario', 'anuladoPor']);
+        });
+    }
+
+    public function ajustarCompraItem(int $compraId, int $itemId, int $nuevaCantidad, float $nuevoPrecioUnitario, ?string $motivo, int $usuarioId): array
+    {
+        return DB::transaction(function () use ($compraId, $itemId, $nuevaCantidad, $nuevoPrecioUnitario, $motivo, $usuarioId) {
+            $compra = Compra::with('items.item')->lockForUpdate()->findOrFail($compraId);
+
+            $compraItem = $compra->items->firstWhere('item_id', $itemId);
+            if (! $compraItem) {
+                throw new \RuntimeException("El ítem #{$itemId} no pertenece a la compra #{$compraId}.");
+            }
+
+            $item             = $compraItem->item;
+            $cantidadAnterior = (int) $compraItem->cantidad;
+            $delta            = $nuevaCantidad - $cantidadAnterior;
+
+            // Update compra_item
+            $nuevoSubtotalItem = round($nuevaCantidad * $nuevoPrecioUnitario, 2);
+            $compraItem->update([
+                'cantidad'        => $nuevaCantidad,
+                'precio_unitario' => $nuevoPrecioUnitario,
+                'subtotal'        => $nuevoSubtotalItem,
+            ]);
+
+            // Recalculate compra totals from DB to handle multi-item compras
+            $nuevoSubtotalCompra = CompraItem::where('compra_id', $compraId)->sum('subtotal');
+            $nuevoTotal          = round((float) $nuevoSubtotalCompra + (float) $compra->impuestos, 2);
+            $totalDelta          = $nuevoTotal - (float) $compra->total;
+
+            $compraUpdates = [
+                'subtotal' => round($nuevoSubtotalCompra, 2),
+                'total'    => $nuevoTotal,
+            ];
+
+            if ($compra->condicion_pago === 'CREDITO') {
+                $nuevoSaldo = max(0, round((float) $compra->saldo_pendiente + $totalDelta, 2));
+                $compraUpdates['saldo_pendiente'] = $nuevoSaldo;
+                if ($nuevoSaldo <= 0 && $compra->estado !== 'ANULADA') {
+                    $compraUpdates['estado'] = 'PAGADA';
+                }
+            }
+
+            $compra->update($compraUpdates);
+
+            // Update inventory
+            $nuevasUnidades = null;
+            if ($item && $item->controla_inventario && $delta !== 0) {
+                $inventario = Inventario::where('empresa_id', $compra->empresa_id)
+                    ->where('item_id', $itemId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($inventario) {
+                    $nuevasUnidades = max(0, (int) $inventario->unidades_actuales + $delta);
+                    $inventario->update(['unidades_actuales' => $nuevasUnidades]);
+
+                    InventarioMovimiento::create([
+                        'empresa_id'           => $compra->empresa_id,
+                        'item_id'              => $itemId,
+                        'usuario_id'           => $usuarioId,
+                        'tipo'                 => $delta > 0 ? 'ENTRADA' : 'SALIDA',
+                        'subtipo'              => $delta > 0 ? 'AJUSTE_COMPRA_AUMENTO' : 'AJUSTE_COMPRA_REDUCCION',
+                        'compra_id'            => $compraId,
+                        'motivo'               => $motivo ?? "Ajuste compra {$compra->numero}",
+                        'referencia_tipo'      => 'COMPRA',
+                        'referencia_id'        => $compraId,
+                        'unidades'             => abs($delta),
+                        'unidades_resultantes' => $nuevasUnidades,
+                        'ocurrido_en'          => now(),
+                    ]);
+                }
+            }
+
+            return [
+                'compra'      => $compra->fresh(['items.item', 'proveedor', 'egresos']),
+                'delta'       => $delta,
+                'stock_nuevo' => $nuevasUnidades,
+            ];
+        });
+    }
+
+    private function sincronizarItems(int $compraId, array $items): void
+    {
+        CompraItem::where('compra_id', $compraId)->delete();
+
+        CompraItem::insert(array_map(fn($item) => [
+            'compra_id'       => $compraId,
+            'item_id'         => $item['item_id'],
+            'cantidad'        => $item['cantidad'],
+            'precio_unitario' => $item['precio_unitario'],
+            'subtotal'        => round($item['cantidad'] * $item['precio_unitario'], 2),
+        ], $items));
+    }
+}

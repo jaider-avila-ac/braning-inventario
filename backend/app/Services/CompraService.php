@@ -1,0 +1,167 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Compra;
+use App\Repositories\CompraRepository;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use App\Services\NumeracionService;
+
+class CompraService
+{
+    public function __construct(
+        private readonly CompraRepository  $compraRepository,
+        private readonly NumeracionService $numeracionService,
+    ) {}
+
+    public function listar(int $empresaId, array $filters = [], int $perPage = 20): LengthAwarePaginator
+    {
+        return $this->compraRepository->paginate($empresaId, $filters, $perPage);
+    }
+
+    public function cuentasPorPagar(int $empresaId): Collection
+    {
+        return Compra::where('empresa_id', $empresaId)
+            ->whereIn('estado', ['PENDIENTE', 'PARCIAL'])
+            ->where('saldo_pendiente', '>', 0)
+            ->with(['proveedor', 'items.item'])
+            ->orderBy('fecha_vencimiento')
+            ->get();
+    }
+
+    public function obtener(int $id, int $empresaId): Compra
+    {
+        $compra = $this->compraRepository->findById($id);
+
+        if (! $compra || $compra->empresa_id !== $empresaId) {
+            throw new HttpException(404, 'Compra no encontrada.');
+        }
+
+        return $compra;
+    }
+
+    public function crear(array $data, int $empresaId, int $usuarioId): Compra
+    {
+        $subtotal = 0;
+        foreach ($data['items'] as $item) {
+            $subtotal += $item['cantidad'] * $item['precio_unitario'];
+        }
+        
+        $impuestos = $data['impuestos'] ?? 0;
+        $total = $subtotal + $impuestos;
+        
+        $saldoPendiente = 0;
+        if (($data['condicion_pago'] ?? 'CONTADO') === 'CREDITO') {
+            $saldoPendiente = $total;
+        }
+
+        $cabecera = [
+            'empresa_id'       => $empresaId,
+            'usuario_id'       => $usuarioId,
+            'proveedor_id'     => $data['proveedor_id'] ?? null,
+            'fecha'            => $data['fecha'],
+            'condicion_pago'   => $data['condicion_pago'] ?? 'CONTADO',
+            'fecha_vencimiento'=> $data['fecha_vencimiento'] ?? null,
+            'subtotal'         => $subtotal,
+            'impuestos'        => $impuestos,
+            'total'            => $total,
+            'saldo_pendiente'  => $saldoPendiente,
+            'estado'           => 'PENDIENTE',
+            'notas'            => $data['notas'] ?? null,
+            'numero'           => null,
+        ];
+
+        return $this->compraRepository->create($cabecera, $data['items']);
+    }
+
+    public function confirmar(int $id, int $empresaId, int $usuarioId, ?array $archivoData = null): Compra
+    {
+        $compra = $this->obtener($id, $empresaId);
+
+        if ($compra->numero !== null) {
+            throw new HttpException(422, 'La compra ya ha sido confirmada.');
+        }
+
+        $numero = $this->numeracionService->siguienteNumero($empresaId, 'COM');
+
+        return $this->compraRepository->confirmar($id, $numero, $usuarioId, $archivoData);
+    }
+
+    public function registrarPago(int $id, array $pagoData, int $empresaId, int $usuarioId): Compra
+    {
+        $compra = $this->obtener($id, $empresaId);
+        
+        if (in_array($compra->estado, ['PAGADA', 'ANULADA'])) {
+            throw new HttpException(422, 'No se puede registrar pagos en compras pagadas o anuladas.');
+        }
+
+        $monto = $pagoData['monto'];
+        $saldoActual = (float) $compra->saldo_pendiente;
+        
+        if ($monto > $saldoActual) {
+            throw new HttpException(422, 'El monto del pago no puede ser mayor al saldo pendiente.');
+        }
+
+        $egresoData = [
+            'fecha'       => $pagoData['fecha'],
+            'descripcion' => $pagoData['descripcion'] ?? "Pago compra {$compra->numero}",
+            'medio_pago'  => $pagoData['medio_pago'],
+            'notas'       => $pagoData['notas'] ?? null,
+        ];
+
+        return $this->compraRepository->registrarPago($id, $monto, $empresaId, $usuarioId, $egresoData);
+    }
+
+    public function anular(int $id, int $empresaId, int $usuarioId): Compra
+    {
+        $compra = $this->obtener($id, $empresaId);
+
+        if ($compra->estado === 'ANULADA') {
+            throw new HttpException(422, 'La compra ya está anulada.');
+        }
+
+        return $this->compraRepository->anular($id, $empresaId, $usuarioId);
+    }
+
+    public function ajustarCompraItem(int $compraId, int $itemId, int $nuevaCantidad, float $nuevoPrecio, ?string $motivo, int $empresaId, int $usuarioId): array
+    {
+        $compra = $this->obtener($compraId, $empresaId);
+
+        if ($compra->estado === 'ANULADA') {
+            throw new HttpException(422, 'No se puede editar una compra anulada.');
+        }
+
+        if ($compra->condicion_pago === 'LIBRE') {
+            throw new HttpException(422, 'Las entradas libres no tienen compra editable. Use un movimiento de ajuste.');
+        }
+
+        return $this->compraRepository->ajustarCompraItem($compraId, $itemId, $nuevaCantidad, $nuevoPrecio, $motivo, $usuarioId);
+    }
+
+    public function listarPorItem(int $itemId, int $empresaId): array
+    {
+        return \App\Models\CompraItem::where('item_id', $itemId)
+            ->whereHas('compra', fn ($q) => $q->where('empresa_id', $empresaId))
+            ->with(['compra.proveedor'])
+            ->get()
+            ->sortByDesc('compra_id')
+            ->map(fn ($ci) => [
+                'compra_id'        => $ci->compra_id,
+                'numero'           => $ci->compra?->numero,
+                'estado'           => $ci->compra?->estado,
+                'condicion_pago'   => $ci->compra?->condicion_pago,
+                'fecha'            => $ci->compra?->fecha,
+                'proveedor_id'     => $ci->compra?->proveedor_id,
+                'proveedor_nombre' => $ci->compra?->proveedor?->nombre,
+                'cantidad'         => $ci->cantidad,
+                'precio_unitario'  => $ci->precio_unitario,
+                'subtotal'         => $ci->subtotal,
+                'total_compra'     => $ci->compra?->total,
+                'saldo_pendiente'  => $ci->compra?->saldo_pendiente,
+            ])
+            ->values()
+            ->all();
+    }
+}

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Factura - Formato 2 (Clásico)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Source+Sans+3:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root { --accent: #7c3a2d; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #ede9e3;
+      font-family: 'Source Sans 3', sans-serif;
+      padding: 32px 20px;
+      min-height: 100vh;
+    }
+
+    /* ── BARRA DE CONTROL ── */
+    .ctrl-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      max-width: 860px; margin: 0 auto 14px;
+      background: white; border-radius: 10px;
+      padding: 10px 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.1);
+    }
+    .fmt-group { display:flex; gap:6px; align-items:center; }
+    .fmt-lbl   { font-size:11px; color:#888; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin-right:4px; }
+    a.fmt-btn  {
+      text-decoration:none; font-size:11px; font-weight:600;
+      padding:5px 12px; border-radius:6px; color:#555;
+      background:#f3f4f6; transition:background .15s;
+    }
+    a.fmt-btn:hover  { background:#e5e7eb; color:#111; }
+    a.fmt-btn.active { background:var(--accent); color:white; }
+    .color-group { display:flex; gap:8px; align-items:center; }
+    .color-lbl   { font-size:11px; color:#888; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+    input[type="color"] {
+      width:36px; height:28px; border:2px solid #e5e7eb;
+      border-radius:6px; cursor:pointer; padding:1px;
+    }
+
+    /* ── FACTURA ── */
+    .factura {
+      display: flex;
+      width: 860px;
+      margin: 0 auto;
+      background: white;
+      box-shadow: 0 10px 50px rgba(0,0,0,.18);
+      min-height: 960px;
+    }
+
+    /* Franja lateral izquierda */
+    .sidebar {
+      width: 210px;
+      flex-shrink: 0;
+      background: var(--accent);
+      display: flex;
+      flex-direction: column;
+      padding: 44px 24px 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .sidebar::before {
+      content: '';
+      position: absolute;
+      bottom: -40px; right: -40px;
+      width: 160px; height: 160px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.07);
+    }
+    .sidebar::after {
+      content: '';
+      position: absolute;
+      bottom: 60px; right: -60px;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.04);
+    }
+
+    .sb-logo { margin-bottom: 36px; }
+    .sb-logo img { width: 120px; filter: brightness(0) invert(1); opacity: .9; }
+
+    .sb-block { margin-bottom: 24px; }
+    .sb-block .sb-lbl {
+      font-size: 9px; text-transform: uppercase; letter-spacing: .14em;
+      color: rgba(255,255,255,.5); margin-bottom: 5px; font-weight: 600;
+    }
+    .sb-block .sb-val {
+      font-size: 12.5px; color: rgba(255,255,255,.9); line-height: 1.55;
+    }
+    .sb-block .sb-val.big {
+      font-family: 'Playfair Display', serif;
+      font-size: 24px; font-weight: 900;
+      line-height: 1; letter-spacing: -.02em;
+    }
+    .sb-divider {
+      border: none; border-top: 1px solid rgba(255,255,255,.15);
+      margin: 4px 0 20px;
+    }
+
+    /* Cuerpo principal */
+    .main {
+      flex: 1;
+      padding: 44px 44px 32px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .main-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 11px; font-weight: 400; font-style: italic;
+      letter-spacing: .18em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 6px;
+    }
+    .main-heading {
+      font-family: 'Playfair Display', serif;
+      font-size: 36px; font-weight: 900;
+      color: #1a1a1a; line-height: 1;
+      margin-bottom: 20px;
+    }
+    .accent-line {
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent) 60%, transparent);
+      margin-bottom: 28px;
+    }
+
+    /* Info cliente */
+    .info-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px 32px; margin-bottom: 32px;
+    }
+    .info-row { display: flex; flex-direction: column; gap: 1px; }
+    .info-row .lbl {
+      font-size: 9px; text-transform: uppercase;
+      letter-spacing: .1em; color: #aaa; font-weight: 600;
+    }
+    .info-row .val { font-size: 13px; color: #222; font-weight: 600; }
+
+    /* Tabla de ítems */
+    .items-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 28px; }
+    .items-table thead th {
+      background: var(--accent);
+      color: white; padding: 10px 12px;
+      text-align: left; font-size: 9px;
+      text-transform: uppercase; letter-spacing: .1em;
+      font-weight: 600;
+    }
+    .items-table thead th:not(:first-child) { text-align: right; }
+    .items-table tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #ede9e3;
+      color: #333;
+    }
+    .items-table tbody td:not(:first-child) { text-align: right; }
+    .items-table tbody tr:last-child td { border-bottom: none; }
+    .items-table tbody tr:nth-child(even) td { background: #faf8f6; }
+
+    /* Totales – sin colores */
+    .totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 28px; }
+    .totals-box { width: 252px; font-size: 13px; }
+    .totals-box .row {
+      display: flex; justify-content: space-between;
+      padding: 6px 0; border-bottom: 1px solid #ede9e3;
+      color: #444;
+    }
+    .totals-box .row.grand {
+      padding: 10px 0; border-top: 2px solid #1a1a1a; border-bottom: 2px solid #1a1a1a;
+      font-family: 'Playfair Display', serif;
+      font-size: 16px; font-weight: 700; color: #111;
+      margin-top: 4px;
+    }
+    .totals-box .row:last-child { border-bottom: none; }
+
+    /* Notas */
+    .notas {
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px;
+      background: #faf8f6;
+      font-size: 12.5px; color: #555;
+      margin-bottom: 32px;
+    }
+    .notas strong { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: #999; margin-bottom: 4px; }
+
+    /* Firma */
+    .firma { margin-bottom: 32px; }
+    .firma-line { width: 160px; border-top: 1px dashed #ccc; padding-top: 8px; }
+    .firma-line .name { font-weight: 700; font-size: 13px; color: #222; }
+    .firma-line .role { font-size: 11px; color: #888; font-style: italic; }
+
+    /* Footer */
+    .footer {
+      margin-top: auto;
+      border-top: 1px solid #e5e0db;
+      padding-top: 14px;
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: #aaa;
+      text-transform: uppercase; letter-spacing: .07em;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ══ BARRA DE CONTROL ══ -->
+  <div class="ctrl-bar">
+    <div class="fmt-group">
+      <span class="fmt-lbl">Formato:</span>
+      <a href="formato1.html" class="fmt-btn">F1 · Original</a>
+      <a href="formato2.html" class="fmt-btn active">F2 · Clásico</a>
+      <a href="formato3.html" class="fmt-btn">F3 · Minimal</a>
+      <a href="formato4.html" class="fmt-btn">F4 · Corporativo</a>
+    </div>
+    <div class="color-group">
+      <span class="color-lbl">Color encabezado:</span>
+      <input type="color" id="colorPicker" value="#7c3a2d">
+    </div>
+  </div>
+
+  <!-- ══ FACTURA ══ -->
+  <div class="factura">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sb-logo">
+        <img src="./logo.png" alt="Logo empresa">
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">Número</div>
+        <div class="sb-val big">FAC-000006</div>
+      </div>
+      <hr class="sb-divider">
+
+      <div class="sb-block">
+        <div class="sb-lbl">Estado</div>
+        <div class="sb-val">EMITIDA</div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">Fecha emisión</div>
+        <div class="sb-val">02/05/2026</div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">Fecha vencimiento</div>
+        <div class="sb-val">16/05/2026</div>
+      </div>
+      <hr class="sb-divider">
+
+      <div class="sb-block">
+        <div class="sb-lbl">Empresa</div>
+        <div class="sb-val">SYS Comercial</div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">NIT</div>
+        <div class="sb-val">900.123.456-7</div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">Dirección</div>
+        <div class="sb-val">Cra 10 #20-30, Bogotá</div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">Teléfono</div>
+        <div class="sb-val">310 555 1234</div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-lbl">Email</div>
+        <div class="sb-val" style="font-size:11px;">info@syscomercial.com</div>
+      </div>
+    </div>
+
+    <!-- CUERPO PRINCIPAL -->
+    <div class="main">
+
+      <div class="main-title">Documento de venta</div>
+      <div class="main-heading">Factura</div>
+      <div class="accent-line"></div>
+
+      <!-- Info cliente y vendedor -->
+      <div class="info-grid">
+        <div class="info-row">
+          <span class="lbl">Cliente</span>
+          <span class="val">Jaider Luis Ávila</span>
+        </div>
+        <div class="info-row">
+          <span class="lbl">Vendedor</span>
+          <span class="val">Admin Empresa2</span>
+        </div>
+        <div class="info-row">
+          <span class="lbl">Documento</span>
+          <span class="val">CC: 1072522489</span>
+        </div>
+        <div class="info-row">
+          <span class="lbl">Dirección cliente</span>
+          <span class="val">San Antero</span>
+        </div>
+      </div>
+
+      <!-- Tabla de ítems -->
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>Valor unitario</th>
+            <th>Descuento</th>
+            <th>Total línea</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>Blusas</td>
+            <td style="text-align:center">1</td>
+            <td>$ 35.000</td>
+            <td>$ 0</td>
+            <td><strong>$ 41.650</strong></td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>Camarón</td>
+            <td style="text-align:center">1</td>
+            <td>$ 45.000</td>
+            <td>$ 0</td>
+            <td><strong>$ 53.550</strong></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Totales – sin colores -->
+      <div class="totals-wrap">
+        <div class="totals-box">
+          <div class="row"><span>Subtotal</span><span>$ 80.000</span></div>
+          <div class="row"><span>Descuentos</span><span>$ 0</span></div>
+          <div class="row"><span>IVA (19%)</span><span>$ 15.200</span></div>
+          <div class="row grand"><span>TOTAL</span><span>$ 95.200</span></div>
+          <div class="row"><span>Pagado</span><span>$ 50.000</span></div>
+          <div class="row"><span>Saldo pendiente</span><span>$ 45.200</span></div>
+        </div>
+      </div>
+
+      <!-- Notas -->
+      <div class="notas">
+        <strong>Notas</strong>
+        Esta es una cotización de práctica
+      </div>
+
+      <!-- Firma -->
+      <div class="firma">
+        <div class="firma-line">
+          <div class="name">Admin Empresa2</div>
+          <div class="role">Vendedor</div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <span>SYS Comercial</span>
+        <span>NIT: 900.123.456-7</span>
+        <span>Cra 10 #20-30, Bogotá</span>
+        <span>Tel: 310 555 1234</span>
+        <span>info@syscomercial.com</span>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const picker = document.getElementById('colorPicker');
+    picker.addEventListener('input', e => {
+      document.documentElement.style.setProperty('--accent', e.target.value);
+    });
+  </script>
+</body>
+</html>

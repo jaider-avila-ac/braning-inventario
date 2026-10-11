@@ -1,0 +1,5 @@
+.env
+# El volcado tiene datos reales: NO subirlo a GitHub, copiarlo al VPS con scp
+database/init/*.sql
+database/init/*.sql.gz
+backups/
