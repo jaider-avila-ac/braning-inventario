@@ -25,7 +25,7 @@ const IMPORT_INITIAL = { phase: "idle", file: null, progress: 0, successCount: 0
 export default function ClientesPage() {
   const {
     clientes, loading, error, pagination,
-    search, setSearch, handleDelete, changePage, reload,
+    search, setSearch, soloDeudores, setSoloDeudores, handleDelete, changePage, reload,
   } = useClientes();
 
   const [importState, setImportState] = useState(IMPORT_INITIAL);
@@ -139,15 +139,26 @@ export default function ClientesPage() {
         </div>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar cliente..."
-          className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg"
-        />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar cliente..."
+            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg"
+          />
+        </div>
+        <label className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm text-gray-700 cursor-pointer select-none whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={soloDeudores}
+            onChange={(e) => setSoloDeudores(e.target.checked)}
+            className="w-4 h-4 accent-red-600"
+          />
+          Solo los que deben
+        </label>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

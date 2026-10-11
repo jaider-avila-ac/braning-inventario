@@ -7,7 +7,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class ClienteRepository
 {
-   public function paginate(int $empresaId, string $search = '', int $perPage = 10, int $page = 1): LengthAwarePaginator
+   public function paginate(int $empresaId, string $search = '', int $perPage = 10, int $page = 1, bool $soloDeudores = false): LengthAwarePaginator
     {
         return Cliente::where('empresa_id', $empresaId)
             ->select('clientes.*')
@@ -18,6 +18,15 @@ class ClienteRepository
                   ->whereColumn('facturas.cliente_id', 'clientes.id')
                   ->where('facturas.estado', 'EMITIDA');
             }, 'total_deuda')
+            ->when($soloDeudores, function ($q) {
+                $q->whereExists(function ($sub) {
+                    $sub->from('facturas')
+                        ->selectRaw('1')
+                        ->whereColumn('facturas.cliente_id', 'clientes.id')
+                        ->where('facturas.estado', 'EMITIDA')
+                        ->where('facturas.saldo', '>', 0);
+                });
+            })
             ->when($search, function($q) use ($search) {
                 return $q->where(function($q) use ($search) {
                     $q->where('nombre_razon_social', 'like', "%{$search}%")

@@ -13,9 +13,9 @@ class ClienteService
         private readonly ClienteRepository $clienteRepository,
     ) {}
 
-     public function listar(int $empresaId, string $search = '', int $perPage = 10, int $page = 1): array
+     public function listar(int $empresaId, string $search = '', int $perPage = 10, int $page = 1, bool $soloDeudores = false): array
     {
-        $paginator = $this->clienteRepository->paginate($empresaId, $search, $perPage, $page);
+        $paginator = $this->clienteRepository->paginate($empresaId, $search, $perPage, $page, $soloDeudores);
         
         return [
             'data' => $paginator->items(),

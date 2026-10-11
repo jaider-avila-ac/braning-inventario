@@ -1,8 +1,9 @@
 import { apiFetch, csrfCookie, uploadWithProgress } from "./api";
 
-export async function listarClientes({ search = "", page = 1, perPage = 10 } = {}) {
+export async function listarClientes({ search = "", page = 1, perPage = 10, soloDeudores = false } = {}) {
   const qs = new URLSearchParams();
   if (search) qs.set("search", search);
+  if (soloDeudores) qs.set("solo_deudores", 1);
   if (page) qs.set("page", page);
   if (perPage) qs.set("per_page", perPage);
   

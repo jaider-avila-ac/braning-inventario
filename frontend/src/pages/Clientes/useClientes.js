@@ -7,6 +7,7 @@ export function useClientes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const [soloDeudores, setSoloDeudores] = useState(false);
   const [pagination, setPagination] = useState({
     currentPage: 1,
     lastPage: 1,
@@ -24,7 +25,8 @@ export function useClientes() {
     setLoading(true);
     try {
       const data = await listarClientes({ 
-        search, 
+        search,
+        soloDeudores,
         page, 
         perPage: pagination.perPage 
       });
@@ -49,7 +51,7 @@ export function useClientes() {
         setLoading(false);
       }
     }
-  }, [search, pagination.perPage]);
+  }, [search, soloDeudores, pagination.perPage]);
 
   // Debounce para búsqueda
   useEffect(() => {
@@ -108,6 +110,8 @@ export function useClientes() {
     pagination,
     search,
     setSearch,
+    soloDeudores,
+    setSoloDeudores,
     handleDelete,
     changePage,
     reload

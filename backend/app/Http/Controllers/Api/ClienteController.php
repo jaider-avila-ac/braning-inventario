@@ -31,7 +31,8 @@ class ClienteController extends Controller
                 $request->empresa_id_ctx,
                 $search,
                 $perPage,
-                $page
+                $page,
+                $request->boolean('solo_deudores')
             )
         );
     }

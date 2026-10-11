@@ -3,3 +3,4 @@
 database/init/*.sql
 database/init/*.sql.gz
 backups/
+docker-compose.override.yml
