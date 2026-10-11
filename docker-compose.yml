@@ -60,8 +60,9 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
-    ports:
-      - "${APP_PORT:-80}:80"
+    # Coolify/Traefik enruta el dominio a este puerto (no se publica en el host)
+    expose:
+      - "80"
 
 volumes:
   db_data:
